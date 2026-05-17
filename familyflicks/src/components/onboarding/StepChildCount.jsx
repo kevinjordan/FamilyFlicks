@@ -2,9 +2,9 @@ export default function StepChildCount({ value, onChange }) {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-white mb-2">How many children?</h2>
+        <h2 className="text-2xl font-bold text-white mb-2">Who's in your household?</h2>
         <p className="text-slate-400 text-sm leading-relaxed">
-          We'll set a cert limit and nudge preference for each one. No names or personal details are stored.
+          Set a cert limit for each person. Choosing 18 marks them as an adult viewer. No names are stored.
         </p>
       </div>
 

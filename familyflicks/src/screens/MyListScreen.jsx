@@ -6,6 +6,26 @@ import { fetchPosterPaths } from '../services/tmdbService'
 import CertBadge from '../components/CertBadge'
 import { RESPONSES, RESPONSE_BG } from '../components/MovieCard'
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const SKIPPED_RESPONSES = new Set(['Not Watched', 'Not Interested', 'Inappropriate'])
+
+function isAdultCert(cert) {
+  return cert === '16' || cert === '18'
+}
+
+function filterByAudience(items, audienceMode) {
+  return items.filter(item => isAdultCert(item.cert) === (audienceMode === 'adults'))
+}
+
+function applyResponseFilter(audienceItems, filterKey, currentResponses) {
+  return audienceItems.filter(item => {
+    const r = currentResponses[item.tmdb_id] ?? item.response
+    if (filterKey === 'skipped') return SKIPPED_RESPONSES.has(r)
+    return r === filterKey
+  })
+}
+
 // ── ListItem ──────────────────────────────────────────────────────────────────
 
 function ListItem({ item, response, rating, posterUrl, onResponseChange, onRatingCommit }) {
@@ -13,7 +33,6 @@ function ListItem({ item, response, rating, posterUrl, onResponseChange, onRatin
   const [localRating, setLocalRating] = useState(rating ?? 5)
   const [committed, setCommitted]     = useState(rating !== null)
 
-  // Sync when rating arrives from GDoc after the initial render
   useEffect(() => {
     if (rating !== null) {
       setLocalRating(rating)
@@ -59,7 +78,7 @@ function ListItem({ item, response, rating, posterUrl, onResponseChange, onRatin
         </div>
       </div>
 
-      {/* Response buttons — tap to change vote */}
+      {/* Response buttons */}
       <div className="grid grid-cols-5 gap-1.5 px-3 pb-3">
         {RESPONSES.map(({ key, emoji, label }) => {
           const isChosen = response === key
@@ -105,7 +124,6 @@ function ListItem({ item, response, rating, posterUrl, onResponseChange, onRatin
                   <span className="text-sm font-bold" style={{ color: committed ? '#818cf8' : '#475569' }}>
                     {committed ? `${localRating} / 10` : '—'}
                   </span>
-                  {/* Cancel only available before the first commit */}
                   {!committed && (
                     <button onClick={handleCancel} className="text-xs text-slate-500 underline">
                       Cancel
@@ -140,13 +158,14 @@ export default function MyListScreen() {
   const gdoc = useGdocService()
   const navigate = useNavigate()
 
-  const [phase, setPhase]             = useState('loading')
-  const [filter, setFilter]           = useState('Interested')
-  const [items, setItems]             = useState([])       // full de-duped list
-  const [ratings, setRatings]         = useState({})
-  const [responses, setResponses]     = useState({})       // live vote overrides
-  const [displayedItems, setDisplayedItems] = useState([]) // stable; only updated on chip click or load
-  const [posterUrls, setPosterUrls]   = useState({})
+  const [phase, setPhase]               = useState('loading')
+  const [audienceMode, setAudienceMode] = useState('children')
+  const [filter, setFilter]             = useState('Interested')
+  const [allItems, setAllItems]         = useState([])
+  const [ratings, setRatings]           = useState({})
+  const [responses, setResponses]       = useState({})
+  const [displayedItems, setDisplayedItems] = useState([])
+  const [posterUrls, setPosterUrls]     = useState({})
 
   useEffect(() => {
     if (!isGoogleConnected) { setPhase('no-auth'); return }
@@ -159,27 +178,25 @@ export default function MyListScreen() {
       await gdoc.findOrCreateSheet()
       const suggestions = await gdoc.readSuggestions()
 
-      const watchedRaw = suggestions.filter(
-        s => s.response === 'Watched' || s.response === 'Interested'
-      )
+      // Load all movies that have any response
+      const allRaw = suggestions.filter(s => s.response)
 
-      // Deduplicate by tmdb_id — keep the last (most recent) row per movie.
-      // Prevents duplicate rows from past write errors showing up in the list.
+      // Deduplicate by tmdb_id — keep the last (most recent) row
       const uniqueMap = new Map()
-      watchedRaw.forEach(s => uniqueMap.set(s.tmdb_id, s))
-      const watched = [...uniqueMap.values()]
+      allRaw.forEach(s => uniqueMap.set(s.tmdb_id, s))
+      const all = [...uniqueMap.values()]
 
-      if (watched.length === 0) { setPhase('empty'); return }
+      if (all.length === 0) { setPhase('empty'); return }
 
       const initialRatings   = {}
       const initialResponses = {}
-      watched.forEach(s => {
+      all.forEach(s => {
         if (s.rating != null) initialRatings[s.tmdb_id] = s.rating
         initialResponses[s.tmdb_id] = s.response
       })
 
-      // Sort once: unrated first, then by rating descending
-      const sorted = [...watched].sort((a, b) => {
+      // Sort: unrated first, then rated descending
+      const sorted = [...all].sort((a, b) => {
         const ra = initialRatings[a.tmdb_id] ?? null
         const rb = initialRatings[b.tmdb_id] ?? null
         if (ra === null && rb === null) return 0
@@ -188,15 +205,17 @@ export default function MyListScreen() {
         return rb - ra
       })
 
-      // Always reset to the default tab on load
+      const defaultMode   = 'children'
       const defaultFilter = 'Interested'
-      const computed = sorted.filter(item => initialResponses[item.tmdb_id] === defaultFilter)
 
+      setAudienceMode(defaultMode)
       setFilter(defaultFilter)
-      setItems(sorted)
+      setAllItems(sorted)
       setRatings(initialRatings)
       setResponses(initialResponses)
-      setDisplayedItems(computed)  // stable display list
+
+      const audienceItems = filterByAudience(sorted, defaultMode)
+      setDisplayedItems(applyResponseFilter(audienceItems, defaultFilter, initialResponses))
       setPhase('ready')
 
       fetchPosterPaths(sorted.map(s => s.tmdb_id))
@@ -207,17 +226,18 @@ export default function MyListScreen() {
     }
   }
 
-  // Switching chips re-filters with the current live responses.
-  // Items changed-but-not-yet-moved will now correctly move to the new tab.
-  function handleFilterChange(newFilter) {
-    setFilter(newFilter)
-    setDisplayedItems(
-      items.filter(item => (responses[item.tmdb_id] ?? item.response) === newFilter)
-    )
+  function handleAudienceModeChange(newMode) {
+    setAudienceMode(newMode)
+    const audienceItems = filterByAudience(allItems, newMode)
+    setDisplayedItems(applyResponseFilter(audienceItems, filter, responses))
   }
 
-  // Vote change: update responses + GDoc but do NOT touch displayedItems.
-  // The item stays visible in the current tab; it moves only on the next chip click.
+  function handleFilterChange(newFilter) {
+    setFilter(newFilter)
+    const audienceItems = filterByAudience(allItems, audienceMode)
+    setDisplayedItems(applyResponseFilter(audienceItems, newFilter, responses))
+  }
+
   function handleResponseChange(tmdbId, responseKey) {
     setResponses(prev => ({ ...prev, [tmdbId]: responseKey }))
     gdoc.updateResponse(tmdbId, responseKey)
@@ -268,7 +288,7 @@ export default function MyListScreen() {
         <div className="space-y-2">
           <h2 className="text-white font-semibold">Nothing here yet</h2>
           <p className="text-slate-400 text-sm max-w-xs leading-relaxed">
-            Mark movies as Watched or Interested in the Suggestions screen and they'll appear here.
+            Respond to movie suggestions and they'll appear here.
           </p>
         </div>
         <button onClick={() => navigate('/')}
@@ -305,6 +325,7 @@ export default function MyListScreen() {
   const FILTERS = [
     { key: 'Interested', label: '👀 To Watch' },
     { key: 'Watched',    label: '✅ Watched'  },
+    { key: 'skipped',    label: '⏭️ Skipped'   },
   ]
 
   return (
@@ -313,11 +334,37 @@ export default function MyListScreen() {
         <h1 className="text-xl font-bold text-white">My List</h1>
       </div>
 
+      {/* Audience toggle */}
+      <div className="flex gap-2 px-6 pb-3">
+        <button
+          onClick={() => handleAudienceModeChange('children')}
+          className="px-4 py-2 rounded-full text-sm font-medium transition-all"
+          style={{
+            background: audienceMode === 'children' ? '#15803d' : 'var(--color-surface)',
+            border:     audienceMode === 'children' ? 'none' : '1px solid var(--color-border)',
+            color:      audienceMode === 'children' ? 'white' : '#94a3b8',
+          }}
+        >
+          👪 Family
+        </button>
+        <button
+          onClick={() => handleAudienceModeChange('adults')}
+          className="px-4 py-2 rounded-full text-sm font-medium transition-all"
+          style={{
+            background: audienceMode === 'adults' ? '#1d4ed8' : 'var(--color-surface)',
+            border:     audienceMode === 'adults' ? 'none' : '1px solid var(--color-border)',
+            color:      audienceMode === 'adults' ? 'white' : '#94a3b8',
+          }}
+        >
+          🍿 Adults
+        </button>
+      </div>
+
       {/* Filter chips */}
-      <div className="flex gap-2 px-6 pb-4">
+      <div className="flex gap-2 px-6 pb-4 overflow-x-auto">
         {FILTERS.map(({ key, label }) => (
           <button key={key} onClick={() => handleFilterChange(key)}
-                  className="px-4 py-2 rounded-full text-sm font-medium transition-all"
+                  className="shrink-0 px-4 py-2 rounded-full text-sm font-medium transition-all"
                   style={{
                     background: filter === key ? '#6366f1' : 'var(--color-surface)',
                     border:     filter === key ? 'none' : '1px solid var(--color-border)',
@@ -326,7 +373,7 @@ export default function MyListScreen() {
             {label}
           </button>
         ))}
-        <span className="ml-auto self-center text-xs text-slate-500">
+        <span className="ml-auto shrink-0 self-center text-xs text-slate-500">
           {displayedItems.length} movie{displayedItems.length !== 1 ? 's' : ''}
           {ratedCount > 0 && ` · ${ratedCount} rated`}
         </span>
@@ -334,11 +381,15 @@ export default function MyListScreen() {
 
       {displayedItems.length === 0 ? (
         <div className="flex flex-col items-center justify-center flex-1 px-6 gap-4 text-center">
-          <div className="text-4xl">{filter === 'Interested' ? '👀' : '✅'}</div>
+          <div className="text-4xl">
+            {filter === 'Interested' ? '👀' : filter === 'Watched' ? '✅' : '⏭️'}
+          </div>
           <p className="text-slate-400 text-sm max-w-xs leading-relaxed">
             {filter === 'Interested'
-              ? 'No movies marked as Want to Watch yet. Respond to suggestions to build your list.'
-              : 'No watched movies yet. Mark suggestions as Watched to track them here.'}
+              ? 'No movies marked as Want to Watch yet.'
+              : filter === 'Watched'
+              ? 'No watched movies yet.'
+              : 'No skipped movies yet.'}
           </p>
         </div>
       ) : (

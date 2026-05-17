@@ -10,14 +10,16 @@ import StepDecade from '../components/onboarding/StepDecade'
 import StepStreaming from '../components/onboarding/StepStreaming'
 import { CERTS, CERT_COLORS } from '../constants/certs'
 
-function ChildCard({ index, value, onChange, onRemove, canRemove }) {
+function PersonCard({ index, value, onChange, onRemove, canRemove }) {
+  const isAdult = value.maxCert === '18'
+
   return (
     <div
       className="rounded-2xl p-4 space-y-4"
       style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
     >
       <div className="flex items-center justify-between">
-        <p className="text-white text-sm font-semibold">Child {index + 1}</p>
+        <p className="text-white text-sm font-semibold">Person {index + 1}</p>
         {canRemove && (
           <button
             onClick={onRemove}
@@ -31,7 +33,7 @@ function ChildCard({ index, value, onChange, onRemove, canRemove }) {
 
       <div>
         <p className="text-slate-500 text-xs mb-2">Maximum certificate</p>
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           {CERTS.map(cert => {
             const selected = value.maxCert === cert
             return (
@@ -50,18 +52,24 @@ function ChildCard({ index, value, onChange, onRemove, canRemove }) {
             )
           })}
         </div>
+        <p className="text-xs text-slate-600 mt-2">
+          {isAdult ? 'Adult viewer — no cert restrictions' : 'G is safest · 18 = adult viewer'}
+        </p>
       </div>
 
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <p className="text-white text-sm">Suggest slightly older movies sometimes?</p>
-          <p className="text-slate-500 text-xs mt-0.5">Up to 2 picks rated one cert above their limit</p>
+      {/* Nudge toggle — hidden for adults (no cert above 18) */}
+      {!isAdult && (
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-white text-sm">Suggest slightly older movies sometimes?</p>
+            <p className="text-slate-500 text-xs mt-0.5">Up to 2 picks rated one cert above their limit</p>
+          </div>
+          <Toggle
+            value={value.nudgeEnabled}
+            onChange={nudgeEnabled => onChange({ ...value, nudgeEnabled })}
+          />
         </div>
-        <Toggle
-          value={value.nudgeEnabled}
-          onChange={nudgeEnabled => onChange({ ...value, nudgeEnabled })}
-        />
-      </div>
+      )}
     </div>
   )
 }
@@ -78,40 +86,41 @@ export default function SettingsScreen() {
   } = useApp()
   const gdoc = useGdocService()
 
-  const [children, setChildren] = useState(familyProfile.children ?? [])
-  const [siblingDefault, setSiblingDefault] = useState(familyProfile.siblingDefault ?? 'youngest')
-  const [language, setLanguage] = useState(familyProfile.language ?? 'en')
-  const [subtitles, setSubtitles] = useState(familyProfile.subtitles ?? false)
+  const [people, setPeople]                     = useState(familyProfile.people ?? familyProfile.children ?? [])
+  const [siblingDefault, setSiblingDefault]     = useState(familyProfile.siblingDefault ?? 'youngest')
+  const [language, setLanguage]                 = useState(familyProfile.language ?? 'en')
+  const [subtitles, setSubtitles]               = useState(familyProfile.subtitles ?? false)
   const [includeAnimation, setIncludeAnimation] = useState(familyProfile.includeAnimation ?? true)
-  const [decadeFrom, setDecadeFrom] = useState(familyProfile.decadeFrom ?? 1990)
+  const [decadeFrom, setDecadeFrom]             = useState(familyProfile.decadeFrom ?? 1990)
   const [streamingServices, setStreamingServices] = useState(familyProfile.streamingServices ?? [])
 
-  function addChild() {
-    if (children.length >= 6) return
-    setChildren(prev => [
+  function addPerson() {
+    if (people.length >= 6) return
+    setPeople(prev => [
       ...prev,
-      { id: `child_${prev.length + 1}`, maxCert: 'PG', nudgeEnabled: false },
+      { id: `person_${prev.length + 1}`, maxCert: 'PG', nudgeEnabled: false },
     ])
   }
 
-  function removeLastChild() {
-    if (children.length <= 1) return
-    setChildren(prev => prev.slice(0, -1))
+  function removePerson(index) {
+    if (people.length <= 1) return
+    setPeople(prev => prev.filter((_, i) => i !== index))
   }
 
-  function updateChild(i, data) {
-    setChildren(prev => prev.map((c, idx) => (idx === i ? data : c)))
+  function updatePerson(i, data) {
+    setPeople(prev => prev.map((p, idx) => (idx === i ? data : p)))
   }
 
   function handleSave() {
+    const nonAdultCount = people.filter(p => p.maxCert !== '18').length
     const profile = {
-      siblingDefault: children.length === 1 ? 'youngest' : siblingDefault,
+      siblingDefault: nonAdultCount <= 1 ? 'youngest' : siblingDefault,
       language,
       subtitles,
       includeAnimation,
       decadeFrom,
       streamingServices,
-      children,
+      people,
     }
     saveFamilyProfile(profile)
     if (isGoogleConnected && spreadsheetId) gdoc.writeSettings(profile)
@@ -122,6 +131,8 @@ export default function SettingsScreen() {
     clearGoogleAuth()
     toast.success('Signed out of Google')
   }
+
+  const nonAdultCount = people.filter(p => p.maxCert !== '18').length
 
   return (
     <div className="flex flex-col" style={{ minHeight: '100%', background: 'var(--color-bg)' }}>
@@ -136,22 +147,22 @@ export default function SettingsScreen() {
         </p>
 
         <div className="mt-8 space-y-10">
-          {/* Children */}
+          {/* Household */}
           <section className="space-y-3">
-            <h2 className="text-lg font-semibold text-white">Children</h2>
-            {children.map((child, i) => (
-              <ChildCard
-                key={child.id}
+            <h2 className="text-lg font-semibold text-white">Household</h2>
+            {people.map((person, i) => (
+              <PersonCard
+                key={person.id}
                 index={i}
-                value={child}
-                onChange={data => updateChild(i, data)}
-                onRemove={removeLastChild}
-                canRemove={i === children.length - 1 && children.length > 1}
+                value={person}
+                onChange={data => updatePerson(i, data)}
+                onRemove={() => removePerson(i)}
+                canRemove={people.length > 1}
               />
             ))}
-            {children.length < 6 && (
+            {people.length < 6 && (
               <button
-                onClick={addChild}
+                onClick={addPerson}
                 className="w-full py-3 rounded-2xl text-sm font-medium"
                 style={{
                   background: 'rgba(99,102,241,0.08)',
@@ -159,13 +170,13 @@ export default function SettingsScreen() {
                   color: '#a5b4fc',
                 }}
               >
-                + Add a child
+                + Add a person
               </button>
             )}
           </section>
 
-          {/* Sibling default — only shown when 2+ children */}
-          {children.length > 1 && (
+          {/* Sibling default — only shown when 2+ non-adult people */}
+          {nonAdultCount > 1 && (
             <section>
               <StepSiblingDefault value={siblingDefault} onChange={setSiblingDefault} />
             </section>
@@ -201,7 +212,6 @@ export default function SettingsScreen() {
               style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
             >
               {isGoogleConnected && authNeedsReconnect ? (
-                /* Token refresh failed — prompt reconnect without losing email */
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-sm font-medium" style={{ color: '#f87171' }}>Session expired</p>
@@ -249,7 +259,7 @@ export default function SettingsScreen() {
         </div>
       </div>
 
-      {/* Save button — sticky to the bottom of the scroll container */}
+      {/* Save button — sticky to the bottom */}
       <div
         className="sticky bottom-0 px-6 py-4"
         style={{

@@ -10,20 +10,21 @@ export default function SuggestionsScreen() {
   const { familyProfile, isGoogleConnected, isOnline } = useApp()
   const gdoc = useGdocService()
 
-  const [phase, setPhase] = useState('idle')
-  const [movies, setMovies] = useState([])
+  const [phase, setPhase]       = useState('idle')
+  const [mode, setMode]         = useState('children')
+  const [movies, setMovies]     = useState([])
   const [responses, setResponses] = useState({})
   const [errorMsg, setErrorMsg] = useState('')
 
   const sessionDate = useRef(new Date().toISOString())
-  const topRef = useRef(null)
+  const topRef      = useRef(null)
 
   const answeredCount = Object.keys(responses).length
-  const canGoAgain = answeredCount >= 5
+  const canGoAgain    = answeredCount >= 5
 
   const subscribedServices = new Set(familyProfile.streamingServices ?? [])
 
-  async function runSession(additionalExcludeIds = []) {
+  async function runSession(additionalExcludeIds = [], sessionMode = mode) {
     setPhase('loading')
     setResponses({})
     sessionDate.current = new Date().toISOString()
@@ -35,7 +36,7 @@ export default function SuggestionsScreen() {
       if (isGoogleConnected) {
         try {
           await gdoc.findOrCreateSheet()
-          const history = await gdoc.readSuggestions()
+          const history   = await gdoc.readSuggestions()
           const historyIds = history.map(r => r.tmdb_id)
           excludeIds = [...new Set([...excludeIds, ...historyIds])]
         } catch {
@@ -43,8 +44,8 @@ export default function SuggestionsScreen() {
         }
       }
 
-      const candidates = await fetchCandidates(familyProfile, excludeIds)
-      const selected = selectSuggestions(candidates, familyProfile)
+      const candidates = await fetchCandidates(familyProfile, excludeIds, sessionMode)
+      const selected   = selectSuggestions(candidates, familyProfile, sessionMode)
 
       if (selected.length === 0) {
         setErrorMsg(
@@ -67,16 +68,14 @@ export default function SuggestionsScreen() {
 
   function handleResponse(movie, responseKey) {
     const previous = responses[movie.tmdb_id]
-    if (previous === responseKey) return // tapped same button — no change
+    if (previous === responseKey) return
 
     setResponses(prev => ({ ...prev, [movie.tmdb_id]: responseKey }))
 
     if (isGoogleConnected) {
       if (previous) {
-        // Already have a GDoc row — update the response column
         gdoc.updateResponse(movie.tmdb_id, responseKey)
       } else {
-        // First response — append a new row
         gdoc.writeSuggestion({
           tmdb_id:      movie.tmdb_id,
           title:        movie.title,
@@ -105,8 +104,38 @@ export default function SuggestionsScreen() {
           </div>
           <h1 className="text-2xl font-bold text-white">Movie Night</h1>
           <p className="text-slate-400 text-sm max-w-xs leading-relaxed">
-            Get 10 personalised picks matched to every child in the room.
+            {mode === 'adults'
+              ? 'Get 10 picks with no cert restrictions — for adult viewers.'
+              : 'Get 10 picks matched to the children in your household.'}
           </p>
+        </div>
+
+        {/* Mode toggle */}
+        <div className="flex gap-3 w-full max-w-sm">
+          <button
+            onClick={() => setMode('children')}
+            className="flex-1 py-4 rounded-2xl flex flex-col items-center gap-1.5 transition-all"
+            style={{
+              background: mode === 'children' ? '#15803d' : 'var(--color-surface)',
+              border:     mode === 'children' ? 'none' : '1px solid var(--color-border)',
+              color:      mode === 'children' ? 'white' : '#94a3b8',
+            }}
+          >
+            <span className="text-2xl">👪</span>
+            <span className="text-xs font-semibold">Family</span>
+          </button>
+          <button
+            onClick={() => setMode('adults')}
+            className="flex-1 py-4 rounded-2xl flex flex-col items-center gap-1.5 transition-all"
+            style={{
+              background: mode === 'adults' ? '#1d4ed8' : 'var(--color-surface)',
+              border:     mode === 'adults' ? 'none' : '1px solid var(--color-border)',
+              color:      mode === 'adults' ? 'white' : '#94a3b8',
+            }}
+          >
+            <span className="text-2xl">🍿</span>
+            <span className="text-xs font-semibold">Adults</span>
+          </button>
         </div>
 
         {!isGoogleConnected && (
@@ -140,7 +169,9 @@ export default function SuggestionsScreen() {
            style={{ background: 'var(--color-bg)' }}>
         <div className="w-10 h-10 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" />
         <div className="text-center space-y-1">
-          <p className="text-white text-sm font-medium">Finding movies for your family…</p>
+          <p className="text-white text-sm font-medium">
+            {mode === 'adults' ? 'Finding picks for adults…' : 'Finding movies for your family…'}
+          </p>
           <p className="text-slate-500 text-xs">This takes a few seconds</p>
         </div>
       </div>
@@ -176,7 +207,9 @@ export default function SuggestionsScreen() {
       <div ref={topRef} />
 
       <div className="px-6 pt-8 pb-4">
-        <h1 className="text-xl font-bold text-white">Tonight's picks</h1>
+        <h1 className="text-xl font-bold text-white">
+          {mode === 'adults' ? 'Adult picks' : "Tonight's picks"}
+        </h1>
         <p className="text-slate-500 text-sm mt-1">
           {answeredCount === 0
             ? `${movies.length} movies — tap to respond, tap again to change`
@@ -204,7 +237,7 @@ export default function SuggestionsScreen() {
           style={{ background: 'linear-gradient(to top, var(--color-bg) 65%, transparent)' }}
         >
           <button
-            onClick={() => runSession(movies.map(m => m.tmdb_id))}
+            onClick={() => runSession(movies.map(m => m.tmdb_id), mode)}
             className="w-full py-4 rounded-2xl font-semibold text-white text-base transition-opacity hover:opacity-90 active:opacity-75"
             style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}
           >

@@ -39,7 +39,7 @@ async function tmdbGet(path, params = {}) {
 // ── Cert helpers ──────────────────────────────────────────────────────────────
 
 // BBFC (GB) cert → approximate Irish equivalent
-const GB_TO_IE = { U: 'G', PG: 'PG', '12': '12A', '12A': '12A', '15': '15A', '15A': '15A' }
+const GB_TO_IE = { U: 'G', PG: 'PG', '12': '12A', '12A': '12A', '15': '15A', '15A': '15A', '18': '18' }
 
 function extractCert(releaseDates) {
   const results = releaseDates?.results ?? []
@@ -167,10 +167,21 @@ async function fetchDetailsInBatches(movies, batchSize = 10, delayMs = 400) {
  * @param {number[]} excludeIds  - TMDB IDs already responded to
  * @returns {Promise<object[]>}  - Enriched candidate movie objects
  */
-export async function fetchCandidates(familyProfile, excludeIds = []) {
+export async function fetchCandidates(familyProfile, excludeIds = [], mode = 'children') {
   const excludeSet = new Set(excludeIds)
-  const { certCeiling, nudgeEnabled } = resolveCertCeiling(familyProfile)
-  const queryCeiling = nudgeEnabled ? (certOneAbove(certCeiling) ?? certCeiling) : certCeiling
+
+  let certCeiling, nudgeEnabled, queryCeiling
+  if (mode === 'adults') {
+    certCeiling  = '18'
+    nudgeEnabled = false
+    queryCeiling = '18'
+  } else {
+    const resolved = resolveCertCeiling(familyProfile)
+    certCeiling  = resolved.certCeiling
+    nudgeEnabled = resolved.nudgeEnabled
+    queryCeiling = nudgeEnabled ? (certOneAbove(certCeiling) ?? certCeiling) : certCeiling
+  }
+
   const baseParams = buildDiscoverParams(familyProfile, queryCeiling)
 
   // ── Pass 1: quality sort, pages 1–10 (10 parallel requests) ──────────────

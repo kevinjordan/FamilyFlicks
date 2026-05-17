@@ -20,7 +20,7 @@ const DEFAULT_PROFILE = {
   includeAnimation: true,
   decadeFrom: 1990,
   streamingServices: [],
-  children: [],
+  people: [],
 }
 
 export function AppProvider({ children }) {
@@ -30,7 +30,14 @@ export function AppProvider({ children }) {
   const [familyProfile, setFamilyProfileState] = useState(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEYS.FAMILY_PROFILE)
-      return stored ? JSON.parse(stored) : DEFAULT_PROFILE
+      if (!stored) return DEFAULT_PROFILE
+      const parsed = JSON.parse(stored)
+      // Migrate old 'children' field to 'people'
+      if (parsed.children && !parsed.people) {
+        parsed.people = parsed.children
+        delete parsed.children
+      }
+      return parsed
     } catch {
       return DEFAULT_PROFILE
     }

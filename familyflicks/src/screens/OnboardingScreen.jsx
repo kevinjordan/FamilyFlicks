@@ -7,17 +7,18 @@ import StepPreferences from '../components/onboarding/StepPreferences'
 import StepDecade from '../components/onboarding/StepDecade'
 import StepStreaming from '../components/onboarding/StepStreaming'
 
-function buildSteps(childCount) {
-  const steps = ['childCount']
-  for (let i = 0; i < childCount; i++) steps.push(`child_${i}`)
-  if (childCount > 1) steps.push('siblingDefault')
+function buildSteps(personCount, people) {
+  const steps = ['personCount']
+  for (let i = 0; i < personCount; i++) steps.push(`person_${i}`)
+  const nonAdultCount = people.filter(p => p.maxCert !== '18').length
+  if (nonAdultCount > 1) steps.push('siblingDefault')
   steps.push('preferences', 'decade', 'streaming')
   return steps
 }
 
-function initChildren(count) {
+function initPeople(count) {
   return Array.from({ length: count }, (_, i) => ({
-    id: `child_${i + 1}`,
+    id: `person_${i + 1}`,
     maxCert: 'PG',
     nudgeEnabled: false,
   }))
@@ -27,51 +28,52 @@ export default function OnboardingScreen() {
   const { completeOnboarding } = useApp()
   const [stepIndex, setStepIndex] = useState(0)
 
-  const [childCount, setChildCount] = useState(1)
-  const [children, setChildren] = useState(initChildren(1))
-  const [childAges, setChildAges] = useState({ 0: 10 })
-  const [siblingDefault, setSiblingDefault] = useState('youngest')
-  const [language, setLanguage] = useState('en')
-  const [subtitles, setSubtitles] = useState(false)
+  const [personCount, setPersonCount]           = useState(1)
+  const [people, setPeople]                     = useState(initPeople(1))
+  const [personAges, setPersonAges]             = useState({ 0: 10 })
+  const [siblingDefault, setSiblingDefault]     = useState('youngest')
+  const [language, setLanguage]                 = useState('en')
+  const [subtitles, setSubtitles]               = useState(false)
   const [includeAnimation, setIncludeAnimation] = useState(true)
-  const [decadeFrom, setDecadeFrom] = useState(1990)
+  const [decadeFrom, setDecadeFrom]             = useState(1990)
   const [streamingServices, setStreamingServices] = useState([])
 
-  const steps = buildSteps(childCount)
+  const steps       = buildSteps(personCount, people)
   const currentStep = steps[stepIndex]
-  const isLastStep = stepIndex === steps.length - 1
+  const isLastStep  = stepIndex === steps.length - 1
 
-  const childIndex = currentStep?.startsWith('child_')
+  const personIndex = currentStep?.startsWith('person_')
     ? parseInt(currentStep.split('_')[1], 10)
     : null
 
-  function handleChildCountChange(count) {
-    setChildCount(count)
-    setChildren(prev => {
+  function handlePersonCountChange(count) {
+    setPersonCount(count)
+    setPeople(prev => {
       const next = [...prev]
       while (next.length < count) {
-        next.push({ id: `child_${next.length + 1}`, maxCert: 'PG', nudgeEnabled: false })
+        next.push({ id: `person_${next.length + 1}`, maxCert: 'PG', nudgeEnabled: false })
       }
       return next.slice(0, count)
     })
   }
 
-  function handleChildChange(i, data) {
-    setChildren(prev => prev.map((c, idx) => (idx === i ? data : c)))
+  function handlePersonChange(i, data) {
+    setPeople(prev => prev.map((p, idx) => (idx === i ? data : p)))
   }
 
   function goNext() {
     if (!isLastStep) {
       setStepIndex(s => s + 1)
     } else {
+      const nonAdultCount = people.filter(p => p.maxCert !== '18').length
       completeOnboarding({
-        siblingDefault: childCount === 1 ? 'youngest' : siblingDefault,
+        siblingDefault: nonAdultCount <= 1 ? 'youngest' : siblingDefault,
         language,
         subtitles,
         includeAnimation,
         decadeFrom,
         streamingServices,
-        children,
+        people,
       })
     }
   }
@@ -110,17 +112,17 @@ export default function OnboardingScreen() {
 
       {/* Step content */}
       <div className="flex-1 overflow-y-auto">
-        {currentStep === 'childCount' && (
-          <StepChildCount value={childCount} onChange={handleChildCountChange} />
+        {currentStep === 'personCount' && (
+          <StepChildCount value={personCount} onChange={handlePersonCountChange} />
         )}
 
-        {childIndex !== null && (
+        {personIndex !== null && (
           <StepChildDetail
-            childIndex={childIndex}
-            value={children[childIndex]}
-            age={childAges[childIndex] ?? 10}
-            onAgeChange={age => setChildAges(prev => ({ ...prev, [childIndex]: age }))}
-            onChange={data => handleChildChange(childIndex, data)}
+            childIndex={personIndex}
+            value={people[personIndex]}
+            age={personAges[personIndex] ?? 10}
+            onAgeChange={age => setPersonAges(prev => ({ ...prev, [personIndex]: age }))}
+            onChange={data => handlePersonChange(personIndex, data)}
           />
         )}
 

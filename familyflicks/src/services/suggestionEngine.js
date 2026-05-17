@@ -30,8 +30,16 @@ function computeScore(movie, userServices) {
  * @param {object}   familyProfile
  * @returns {object[]}            - Up to 10 movies, internal scoring fields stripped
  */
-export function selectSuggestions(candidates, familyProfile) {
-  const { certCeiling, nudgeEnabled } = resolveCertCeiling(familyProfile)
+export function selectSuggestions(candidates, familyProfile, mode = 'children') {
+  let certCeiling, nudgeEnabled
+  if (mode === 'adults') {
+    certCeiling  = '18'
+    nudgeEnabled = false
+  } else {
+    const resolved = resolveCertCeiling(familyProfile)
+    certCeiling  = resolved.certCeiling
+    nudgeEnabled = resolved.nudgeEnabled
+  }
   const ceilingRank  = CERT_RANK[certCeiling] ?? 1
   const userServices = new Set(familyProfile.streamingServices ?? [])
 
