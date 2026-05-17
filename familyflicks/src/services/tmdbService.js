@@ -158,42 +158,46 @@ async function fetchDetailsInBatches(movies, batchSize = 10, delayMs = 400) {
 // ── fetchCandidates — main export ─────────────────────────────────────────────
 
 /**
- * Fetches up to ~60 movie candidates matching the family profile,
- * excluding any IDs already in the suggestion history.
+ * Fetches movie candidates matching the family profile using up to three passes:
+ *  Pass 1 — vote_average.desc, pages 1-10  (~200 movies, best quality first)
+ *  Pass 2 — popularity.desc, pages 1-5     (different ranking, triggered when pass 1 runs thin)
+ *  Pass 3 — relax vote_count to 50, pages 1-5 (widens the pool, triggered when very thin)
  *
- * @param {object} familyProfile
+ * @param {object}   familyProfile
  * @param {number[]} excludeIds  - TMDB IDs already responded to
- * @returns {Promise<object[]>}  - Array of candidate movie objects
+ * @returns {Promise<object[]>}  - Enriched candidate movie objects
  */
 export async function fetchCandidates(familyProfile, excludeIds = []) {
   const excludeSet = new Set(excludeIds)
   const { certCeiling, nudgeEnabled } = resolveCertCeiling(familyProfile)
+  const queryCeiling = nudgeEnabled ? (certOneAbove(certCeiling) ?? certCeiling) : certCeiling
+  const baseParams = buildDiscoverParams(familyProfile, queryCeiling)
 
-  // If any child has nudge enabled, widen the TMDB query by one cert level
-  // so the suggestion engine has nudge candidates to choose from.
-  const queryCeiling = nudgeEnabled
-    ? (certOneAbove(certCeiling) ?? certCeiling)
-    : certCeiling
+  // ── Pass 1: quality sort, pages 1–10 (10 parallel requests) ──────────────
+  const pass1 = await Promise.all(
+    Array.from({ length: 10 }, (_, i) => fetchDiscoverPage(baseParams, i + 1))
+  )
+  let raw = pass1.flatMap(p => p.results ?? [])
 
-  const discoverParams = buildDiscoverParams(familyProfile, queryCeiling)
-
-  // Fetch pages 1–3 in parallel
-  const pages = await Promise.all([1, 2, 3].map(page =>
-    fetchDiscoverPage(discoverParams, page)
-  ))
-
-  let raw = pages.flatMap(p => p.results ?? [])
-
-  // If fewer than 20 non-excluded movies remain, top up with pages 4–5
-  const afterExclusion = raw.filter(m => !excludeSet.has(m.id))
-  if (afterExclusion.length < 20) {
-    const extraPages = await Promise.all([4, 5].map(page =>
-      fetchDiscoverPage(discoverParams, page)
-    ))
-    raw = [...raw, ...extraPages.flatMap(p => p.results ?? [])]
+  // ── Pass 2: popularity sort — triggered when fewer than 30 fresh candidates
+  if (raw.filter(m => !excludeSet.has(m.id)).length < 30) {
+    const popParams = { ...baseParams, sort_by: 'popularity.desc' }
+    const pass2 = await Promise.all(
+      Array.from({ length: 5 }, (_, i) => fetchDiscoverPage(popParams, i + 1))
+    )
+    raw = [...raw, ...pass2.flatMap(p => p.results ?? [])]
   }
 
-  // Deduplicate by ID, then apply exclusion list
+  // ── Pass 3: relax vote_count — triggered when still fewer than 15 candidates
+  if (raw.filter(m => !excludeSet.has(m.id)).length < 15) {
+    const relaxedParams = { ...baseParams, 'vote_count.gte': 50, sort_by: 'vote_count.desc' }
+    const pass3 = await Promise.all(
+      Array.from({ length: 5 }, (_, i) => fetchDiscoverPage(relaxedParams, i + 1))
+    )
+    raw = [...raw, ...pass3.flatMap(p => p.results ?? [])]
+  }
+
+  // Deduplicate by ID and apply exclusion list
   const seen = new Set()
   const candidates = raw.filter(m => {
     if (seen.has(m.id) || excludeSet.has(m.id)) return false
@@ -201,8 +205,8 @@ export async function fetchCandidates(familyProfile, excludeIds = []) {
     return true
   })
 
-  // Fetch cert + streaming in batches
-  return fetchDetailsInBatches(candidates)
+  // Cap at 80 for detail fetching — keeps API calls and load time reasonable
+  return fetchDetailsInBatches(candidates.slice(0, 80))
 }
 
 // ── fetchPosterPaths — used by My List screen ─────────────────────────────────

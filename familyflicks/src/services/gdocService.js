@@ -1,6 +1,7 @@
 import toast from 'react-hot-toast'
 
 const SHEETS_BASE = 'https://sheets.googleapis.com/v4/spreadsheets'
+const DRIVE_BASE   = 'https://www.googleapis.com/drive/v3'
 const SPREADSHEET_NAME = 'FamilyFlicks_Data'
 const SUGGESTIONS_HEADERS = [
   'tmdb_id', 'title', 'cert', 'genre', 'release_year',
@@ -64,12 +65,12 @@ async function ensureHeaders(getToken, spreadsheetId) {
 }
 
 // ── findOrCreateSheet ────────────────────────────────────────────────────────
-// Returns the spreadsheet ID, creating the sheet if needed.
-// Drive files.list is not used — drive.file scope does not permit corpus
-// searches; the spreadsheet ID is persisted in localStorage instead.
+// Priority: stored ID → Drive search (oldest file) → create new.
+// Drive search is attempted with drive.file scope; 403 is caught gracefully
+// so a missing permission never blocks the app.
 
 export async function findOrCreateSheet(getToken, storedId, saveId) {
-  // 1. Verify the stored ID is still accessible
+  // 1. Fast path — verify the locally-stored ID is still accessible
   if (storedId) {
     try {
       await apiRequest(getToken, {
@@ -80,11 +81,37 @@ export async function findOrCreateSheet(getToken, storedId, saveId) {
       return storedId
     } catch (err) {
       if (err.status !== 404 && err.status !== 403) throw err
-      // File deleted or unshared — fall through to create a new one
+      // File deleted or unshared — fall through
     }
   }
 
-  // 2. Create a new spreadsheet with both sheets in one call
+  // 2. Search Drive for an existing FamilyFlicks_Data spreadsheet.
+  //    orderBy=createdTime picks the oldest (original) file if duplicates exist.
+  //    403 is caught: drive.file scope can be finicky — fall through to create.
+  try {
+    const { files } = await apiRequest(getToken, {
+      base: DRIVE_BASE,
+      path: '/files',
+      params: {
+        q:       `name='${SPREADSHEET_NAME}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`,
+        spaces:  'drive',
+        fields:  'files(id)',
+        pageSize:'10',
+        orderBy: 'createdTime',
+      },
+    })
+    if (files?.length > 0) {
+      const id = files[0].id
+      saveId(id)
+      await ensureHeaders(getToken, id)
+      return id
+    }
+  } catch (err) {
+    if (err.status !== 403) throw err
+    // 403 = scope can't search; fall through to create
+  }
+
+  // 3. Create a new spreadsheet with both sheets in one call
   const created = await apiRequest(getToken, {
     method: 'POST',
     path: '',
