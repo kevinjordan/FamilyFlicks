@@ -4,39 +4,44 @@ import { useApp } from '../context/AppContext'
 import { useGdocService } from '../hooks/useGdocService'
 import { fetchPosterPaths } from '../services/tmdbService'
 import CertBadge from '../components/CertBadge'
+import { RESPONSES, RESPONSE_BG } from '../components/MovieCard'
 
 // ── ListItem ──────────────────────────────────────────────────────────────────
 
-function ListItem({ item, rating, posterUrl, onRatingChange, onRatingCommit }) {
-  // touched: true once user drags slider or there's an existing rating
-  const [touched, setTouched] = useState(rating !== null)
+function ListItem({ item, response, rating, posterUrl, onResponseChange, onRatingCommit }) {
+  const [sliderOpen, setSliderOpen]   = useState(rating !== null)
+  const [localRating, setLocalRating] = useState(rating ?? 5)
+  const [committed, setCommitted]     = useState(rating !== null)
 
-  // Sync if the parent rating prop arrives after first render (GDoc data)
+  // Sync when rating arrives from GDoc after the initial render
   useEffect(() => {
-    if (rating !== null) setTouched(true)
+    if (rating !== null) {
+      setLocalRating(rating)
+      setSliderOpen(true)
+      setCommitted(true)
+    }
   }, [rating])
 
-  const sliderValue = rating ?? 5
+  // Only show the rating section when the current response is Watched or Interested
+  const showRating = response === 'Watched' || response === 'Interested'
 
-  function handleChange(e) {
-    setTouched(true)
-    onRatingChange(Number(e.target.value))
+  function handleSliderCommit(value) {
+    setCommitted(true)
+    onRatingCommit(value)
   }
 
-  function handleCommit(e) {
-    onRatingCommit(Number(e.currentTarget.value))
+  function handleCancel() {
+    setSliderOpen(false)
+    setLocalRating(rating ?? 5) // restore previous value
   }
-
-  const isWatched = item.response === 'Watched'
 
   return (
     <div
       className="rounded-2xl overflow-hidden"
       style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
     >
-      {/* Movie info row */}
+      {/* Movie info */}
       <div className="flex gap-3 p-3">
-        {/* Poster — w185 size */}
         <div
           className="shrink-0 w-14 h-20 rounded-lg overflow-hidden flex items-center justify-center text-2xl"
           style={{ background: 'var(--color-surface-raised)' }}
@@ -46,74 +51,86 @@ function ListItem({ item, rating, posterUrl, onRatingChange, onRatingCommit }) {
             : '🎬'}
         </div>
 
-        {/* Info */}
         <div className="flex-1 min-w-0">
           <h3 className="text-white text-sm font-semibold leading-snug line-clamp-2">{item.title}</h3>
-
-          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+          <div className="flex items-center gap-1.5 mt-1">
             <CertBadge cert={item.cert} />
-            {item.release_year && (
-              <span className="text-slate-500 text-xs">{item.release_year}</span>
-            )}
-            <span
-              className="ml-auto text-xs rounded-full"
-              style={{
-                padding: '2px 7px',
-                background: isWatched ? 'rgba(22,163,74,0.15)' : 'rgba(37,99,235,0.15)',
-                color:      isWatched ? '#4ade80'              : '#60a5fa',
-              }}
-            >
-              {isWatched ? '✅ Watched' : '👀 Interested'}
-            </span>
+            {item.release_year && <span className="text-slate-500 text-xs">{item.release_year}</span>}
           </div>
         </div>
       </div>
 
-      {/* Rating area */}
-      <div className="px-3 pb-3">
-        {!touched ? (
-          <button
-            onClick={() => setTouched(true)}
-            className="w-full text-xs py-2 rounded-xl text-center"
-            style={{
-              background: 'var(--color-surface-raised)',
-              border: '1px dashed rgba(255,255,255,0.1)',
-              color: '#64748b',
-            }}
-          >
-            Tap to rate
-          </button>
-        ) : (
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-slate-500">Your rating</span>
-              <span className="text-sm font-bold" style={{ color: rating !== null ? '#818cf8' : '#475569' }}>
-                {rating !== null ? `${rating} / 10` : '—'}
-              </span>
-            </div>
-            <input
-              type="range"
-              min="1"
-              max="10"
-              step="1"
-              value={sliderValue}
-              onChange={handleChange}
-              onMouseUp={handleCommit}
-              onTouchEnd={handleCommit}
-              className="w-full"
-              style={{ accentColor: '#6366f1' }}
-            />
-            <div
-              className="flex justify-between text-slate-600"
-              style={{ fontSize: 9 }}
+      {/* Response buttons — tap to change vote */}
+      <div className="grid grid-cols-5 gap-1.5 px-3 pb-3">
+        {RESPONSES.map(({ key, emoji, label }) => {
+          const isChosen = response === key
+          return (
+            <button
+              key={key}
+              onClick={() => onResponseChange(key)}
+              className="flex flex-col items-center justify-center gap-0.5 py-2 rounded-xl transition-all"
+              style={{
+                background: isChosen ? RESPONSE_BG[key] : 'var(--color-surface-raised)',
+                opacity: !isChosen && response ? 0.4 : 1,
+              }}
             >
-              <span>1</span>
-              <span>5</span>
-              <span>10</span>
-            </div>
-          </div>
-        )}
+              <span className="text-base leading-none">{emoji}</span>
+              <span className="leading-none" style={{ fontSize: 9, color: isChosen ? 'white' : '#94a3b8' }}>
+                {label}
+              </span>
+            </button>
+          )
+        })}
       </div>
+
+      {/* Rating — only for Watched / Interested */}
+      {showRating && (
+        <div className="px-3 pb-3">
+          {!sliderOpen ? (
+            <button
+              onClick={() => setSliderOpen(true)}
+              className="w-full text-xs py-2 rounded-xl text-center"
+              style={{
+                background: 'var(--color-surface-raised)',
+                border: '1px dashed rgba(255,255,255,0.1)',
+                color: '#64748b',
+              }}
+            >
+              Tap to rate
+            </button>
+          ) : (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-500">Your rating</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-bold" style={{ color: committed ? '#818cf8' : '#475569' }}>
+                    {committed ? `${localRating} / 10` : '—'}
+                  </span>
+                  {/* Cancel is only available before the first commit */}
+                  {!committed && (
+                    <button onClick={handleCancel} className="text-xs text-slate-500 underline">
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              </div>
+              <input
+                type="range"
+                min="1" max="10" step="1"
+                value={localRating}
+                onChange={e => setLocalRating(Number(e.target.value))}
+                onMouseUp={e => handleSliderCommit(Number(e.target.value))}
+                onTouchEnd={e => handleSliderCommit(Number(e.currentTarget.value))}
+                className="w-full"
+                style={{ accentColor: '#6366f1' }}
+              />
+              <div className="flex justify-between text-slate-600" style={{ fontSize: 9 }}>
+                <span>1</span><span>5</span><span>10</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -125,17 +142,15 @@ export default function MyListScreen() {
   const gdoc = useGdocService()
   const navigate = useNavigate()
 
-  const [phase, setPhase] = useState('loading') // 'loading'|'ready'|'empty'|'error'|'no-auth'
-  const [items, setItems] = useState([])         // pre-sorted on load, stable thereafter
-  const [ratings, setRatings] = useState({})     // { [tmdb_id]: number }
+  const [phase, setPhase]         = useState('loading')
+  const [items, setItems]         = useState([])       // pre-sorted on load, stable thereafter
+  const [ratings, setRatings]     = useState({})       // { [tmdb_id]: number }
+  const [responses, setResponses] = useState({})       // { [tmdb_id]: responseKey } — tracks overrides
   const [posterUrls, setPosterUrls] = useState({})
-  const [filter, setFilter] = useState('Interested') // 'Interested' | 'Watched'
+  const [filter, setFilter]       = useState('Interested')
 
   useEffect(() => {
-    if (!isGoogleConnected) {
-      setPhase('no-auth')
-      return
-    }
+    if (!isGoogleConnected) { setPhase('no-auth'); return }
     loadList()
   }, [isGoogleConnected]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -149,15 +164,13 @@ export default function MyListScreen() {
         s => s.response === 'Watched' || s.response === 'Interested'
       )
 
-      if (watched.length === 0) {
-        setPhase('empty')
-        return
-      }
+      if (watched.length === 0) { setPhase('empty'); return }
 
-      // Build initial ratings map from GDoc data
       const initialRatings = {}
+      const initialResponses = {}
       watched.forEach(s => {
         if (s.rating != null) initialRatings[s.tmdb_id] = s.rating
+        initialResponses[s.tmdb_id] = s.response
       })
 
       // Sort once: unrated first, then by rating descending
@@ -172,19 +185,20 @@ export default function MyListScreen() {
 
       setItems(sorted)
       setRatings(initialRatings)
+      setResponses(initialResponses)
       setPhase('ready')
 
-      // Fetch poster images in the background — doesn't block rendering
       fetchPosterPaths(sorted.map(s => s.tmdb_id))
         .then(urls => setPosterUrls(urls))
-        .catch(() => {}) // non-critical
+        .catch(() => {})
     } catch {
       setPhase('error')
     }
   }
 
-  function handleRatingChange(tmdbId, value) {
-    setRatings(prev => ({ ...prev, [tmdbId]: value }))
+  function handleResponseChange(tmdbId, responseKey) {
+    setResponses(prev => ({ ...prev, [tmdbId]: responseKey }))
+    gdoc.updateResponse(tmdbId, responseKey)
   }
 
   function handleRatingCommit(tmdbId, value) {
@@ -205,11 +219,9 @@ export default function MyListScreen() {
             Connect Google in Settings to save your watch history and rate movies here.
           </p>
         </div>
-        <button
-          onClick={() => navigate('/settings')}
-          className="px-8 py-3 rounded-2xl font-semibold text-white text-sm"
-          style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}
-        >
+        <button onClick={() => navigate('/settings')}
+                className="px-8 py-3 rounded-2xl font-semibold text-white text-sm"
+                style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}>
           Go to Settings →
         </button>
       </div>
@@ -237,11 +249,9 @@ export default function MyListScreen() {
             Mark movies as Watched or Interested in the Suggestions screen and they'll appear here.
           </p>
         </div>
-        <button
-          onClick={() => navigate('/')}
-          className="px-8 py-3 rounded-2xl font-semibold text-white text-sm"
-          style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}
-        >
+        <button onClick={() => navigate('/')}
+                className="px-8 py-3 rounded-2xl font-semibold text-white text-sm"
+                style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}>
           Get Suggestions →
         </button>
       </div>
@@ -257,11 +267,9 @@ export default function MyListScreen() {
           <h2 className="text-white font-semibold">Couldn't load your list</h2>
           <p className="text-slate-400 text-sm">Check your connection and try again.</p>
         </div>
-        <button
-          onClick={loadList}
-          className="px-8 py-3 rounded-2xl font-semibold text-white text-sm"
-          style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}
-        >
+        <button onClick={loadList}
+                className="px-8 py-3 rounded-2xl font-semibold text-white text-sm"
+                style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}>
           Try again
         </button>
       </div>
@@ -270,7 +278,8 @@ export default function MyListScreen() {
 
   // ── Ready ─────────────────────────────────────────────────────────────────
 
-  const filtered = items.filter(item => item.response === filter)
+  // Filter uses local `responses` state so changes take effect immediately
+  const filtered = items.filter(item => (responses[item.tmdb_id] ?? item.response) === filter)
   const ratedCount = filtered.filter(item => ratings[item.tmdb_id] != null).length
 
   const FILTERS = [
@@ -280,7 +289,6 @@ export default function MyListScreen() {
 
   return (
     <div className="flex flex-col" style={{ minHeight: '100%', background: 'var(--color-bg)' }}>
-      {/* Header */}
       <div className="px-6 pt-8 pb-3">
         <h1 className="text-xl font-bold text-white">My List</h1>
       </div>
@@ -288,16 +296,13 @@ export default function MyListScreen() {
       {/* Filter chips */}
       <div className="flex gap-2 px-6 pb-4">
         {FILTERS.map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={() => setFilter(key)}
-            className="px-4 py-2 rounded-full text-sm font-medium transition-all"
-            style={{
-              background: filter === key ? '#6366f1' : 'var(--color-surface)',
-              border:     filter === key ? 'none' : '1px solid var(--color-border)',
-              color:      filter === key ? 'white' : '#94a3b8',
-            }}
-          >
+          <button key={key} onClick={() => setFilter(key)}
+                  className="px-4 py-2 rounded-full text-sm font-medium transition-all"
+                  style={{
+                    background: filter === key ? '#6366f1' : 'var(--color-surface)',
+                    border:     filter === key ? 'none' : '1px solid var(--color-border)',
+                    color:      filter === key ? 'white' : '#94a3b8',
+                  }}>
             {label}
           </button>
         ))}
@@ -307,7 +312,6 @@ export default function MyListScreen() {
         </span>
       </div>
 
-      {/* List */}
       {filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center flex-1 px-6 gap-4 text-center">
           <div className="text-4xl">{filter === 'Interested' ? '👀' : '✅'}</div>
@@ -323,9 +327,10 @@ export default function MyListScreen() {
             <ListItem
               key={item.tmdb_id}
               item={item}
+              response={responses[item.tmdb_id] ?? item.response}
               rating={ratings[item.tmdb_id] ?? null}
               posterUrl={posterUrls[item.tmdb_id] ?? null}
-              onRatingChange={v => handleRatingChange(item.tmdb_id, v)}
+              onResponseChange={key => handleResponseChange(item.tmdb_id, key)}
               onRatingCommit={v => handleRatingCommit(item.tmdb_id, v)}
             />
           ))}
