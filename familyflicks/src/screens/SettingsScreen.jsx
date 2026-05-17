@@ -127,7 +127,10 @@ export default function SettingsScreen() {
     <div className="flex flex-col" style={{ minHeight: '100%', background: 'var(--color-bg)' }}>
       {/* Scrollable content */}
       <div className="flex-1 px-6 pt-10 pb-6">
-        <h1 className="text-2xl font-bold text-white">Settings</h1>
+        <div className="flex items-baseline justify-between">
+          <h1 className="text-2xl font-bold text-white">Settings</h1>
+          <span className="text-slate-600 text-xs">{__BUILD_DATE__}</span>
+        </div>
         <p className="text-slate-400 text-sm mt-1">
           Changes take effect on your next suggestion session.
         </p>
